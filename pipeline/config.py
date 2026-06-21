@@ -106,8 +106,23 @@ class Config:
     
     # ============ API PARAMETERS ============
     API_HOST = "0.0.0.0"
-    API_PORT = 8000
+    API_PORT = int(os.getenv("PORT", os.getenv("API_PORT", "7860")))
     API_WORKERS = 1
+
+    # Comma-separated list of allowed browser origins (Vercel frontend, local dev)
+    CORS_ORIGINS = [
+        origin.strip()
+        for origin in os.getenv(
+            "CORS_ORIGINS",
+            "http://localhost:3000,http://127.0.0.1:3000",
+        ).split(",")
+        if origin.strip()
+    ]
+    # Allow any *.vercel.app preview/production deployment
+    CORS_ORIGIN_REGEX = os.getenv(
+        "CORS_ORIGIN_REGEX",
+        r"https://.*\.vercel\.app",
+    )
 
     @classmethod
     def ensure_folders_exist(cls):

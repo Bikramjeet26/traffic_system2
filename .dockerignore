@@ -1,0 +1,28 @@
+# Frontend (deployed separately on Vercel)
+node_modules
+.next
+out
+app
+components
+lib
+public
+package.json
+pnpm-lock.yaml
+tsconfig.json
+tsconfig.tsbuildinfo
+next.config.mjs
+postcss.config.mjs
+components.json
+
+# Local / dev
+traffic_venv
+.env
+.env.*
+.git
+.github
+.vscode
+*.md
+!README.md
+test_images_for_preprocessing
+face_database
+evidence

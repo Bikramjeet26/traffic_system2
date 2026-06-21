@@ -5,4 +5,8 @@ traffic_venv/
 __pycache__/
 *.pyc
 .env
+.env.local
+node_modules/
+.next/
+out/
 EOF

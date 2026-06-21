@@ -17,7 +17,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy your source code
 COPY . .
 
-# Expose the API port
+# Expose the API port (Hugging Face Spaces)
+ENV PORT=7860
 EXPOSE 7860
 
 # Run the API with uvicorn

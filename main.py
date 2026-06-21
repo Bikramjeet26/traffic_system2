@@ -2,9 +2,12 @@
 
 import os
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from datetime import datetime, timezone
 from pipeline import TrafficViolationPipeline
+from pipeline.config import Config
 from pipeline.utils import load_all_evidence
 
 # ============ INITIALIZATION ============
@@ -15,8 +18,22 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# CORS — required for Vercel frontend calling this HF Spaces backend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=Config.CORS_ORIGINS,
+    allow_origin_regex=Config.CORS_ORIGIN_REGEX or None,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Initialize pipeline (singleton instance)
 pipeline = TrafficViolationPipeline()
+
+# Serve stored evidence images/JSON for the frontend violations log
+Config.ensure_folders_exist()
+app.mount("/evidence", StaticFiles(directory=Config.EVIDENCE_FOLDER), name="evidence")
 
 
 # ============ HEALTH CHECK ============
