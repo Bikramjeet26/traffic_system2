@@ -1,6 +1,8 @@
 """FastAPI Application for Traffic Violation Detection System"""
 
 import os
+import uuid
+import json
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -10,6 +12,7 @@ from pipeline import TrafficViolationPipeline
 from pipeline.config import Config
 from pipeline.utils import load_all_evidence
 from pipeline.face_match_service import FaceMatchService
+from pipeline.stopline import process_video_headless
 
 # ============ INITIALIZATION ============
 
@@ -81,14 +84,6 @@ async def analyze_violation(
     
     Returns:
         JSON with evidence record and annotated image (base64)
-    
-    Example:
-        POST /analyze
-        Form data:
-            - file: [image file]
-            - timestamp: "2025-06-18T14:30:22.123Z"
-            - gps_lat: 28.6139
-            - gps_lon: 77.2090
     """
     try:
         # Read image bytes
@@ -133,18 +128,80 @@ async def analyze_violation(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
+# ============ ENDPOINT: ANALYZE VIDEO (STOP-LINE) ============
+@app.post("/analyze-video")
+async def analyze_video_upload(
+    file: UploadFile = File(..., description="Video file (mp4, mov)"),
+    stop_line: str = Form(None, description="Optional normalized stop line as JSON '[x1,y1,x2,y2]' (0..1)"),
+    initial_light_state: str = Form("red", description="Initial light state: 'red' or 'green'"),
+    conf_thres: float = Form(0.3, description="Detection confidence threshold"),
+):
+    """
+    Headless video analysis that runs the stop-line pipeline on an uploaded video.
+    Returns annotated video URL and JSON results saved under /evidence.
+    """
+    try:
+        # Save uploaded video to the evidence folder
+        Config.ensure_folders_exist()
+        tmp_name = f"upload_{uuid.uuid4().hex}.mp4"
+        tmp_path = os.path.join(Config.EVIDENCE_FOLDER, tmp_name)
+
+        contents = await file.read()
+        if not contents:
+            raise HTTPException(status_code=400, detail="Empty video file uploaded")
+
+        with open(tmp_path, "wb") as f:
+            f.write(contents)
+
+        # parse stop_line JSON if provided
+        stop_line_norm = None
+        if stop_line:
+            try:
+                parsed = json.loads(stop_line)
+                if (isinstance(parsed, list) or isinstance(parsed, tuple)) and len(parsed) == 4:
+                    stop_line_norm = tuple(map(float, parsed))
+                else:
+                    raise ValueError("stop_line must be a JSON array of 4 numbers [x1,y1,x2,y2]")
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Invalid stop_line: {e}")
+
+        # Run the headless video processing function (synchronous)
+        result = process_video_headless(
+            video_path=tmp_path,
+            model_path=None,
+            stop_line_norm=stop_line_norm,
+            initial_light_state=initial_light_state,
+            conf_thres=float(conf_thres),
+            output_basename=f"stopline_{uuid.uuid4().hex}"
+        )
+
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("error", "Processing failed"))
+
+        # Return the web-accessible URL for the annotated video and JSON
+        return JSONResponse(status_code=200, content={
+            "success": True,
+            "annotated_video_url": result.get("annotated_video_url"),
+            "annotated_video_path": result.get("annotated_video_path"),
+            "results_json_url": result.get("results_json_url"),
+            "results_json_path": result.get("results_json_path"),
+            "violations_count": len(result.get("violations", [])),
+            "violations": result.get("violations", []),
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in /analyze-video: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
+
 # ============ ENDPOINT 2: GET VIOLATIONS ============
 
 @app.get("/violations")
 async def get_violations():
     """
     Retrieve all stored violation evidence records.
-    
-    Returns:
-        List of evidence dictionaries (most recent first)
-    
-    Example:
-        GET /violations
     """
     try:
         evidence_list = load_all_evidence()
@@ -169,12 +226,6 @@ async def get_violations():
 async def get_stats():
     """
     Get aggregated violation statistics from all stored records.
-    
-    Returns:
-        Violation counts by type and total vehicles detected
-    
-    Example:
-        GET /stats
     """
     try:
         evidence_list = load_all_evidence()
