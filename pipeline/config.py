@@ -1,6 +1,7 @@
 """Configuration for Traffic Violation Detection System"""
 
 import os
+import shutil
 
 class Config:
     """Centralized configuration for all models, paths, and thresholds"""
@@ -18,6 +19,18 @@ class Config:
     
     # ============ FOLDER PATHS ============
     EVIDENCE_FOLDER = os.path.join(BASE_PATH, "evidence")
+    FACE_DATABASE_FOLDER = os.path.join(BASE_PATH, "face_database")
+
+    # ============ FACIAL RECOGNITION ============
+    FACE_MODEL = "Facenet512"
+    FACE_DETECTOR = "retinaface"
+    FACE_SIMILARITY_THRESHOLD = float(os.getenv("FACE_SIMILARITY_THRESHOLD", "0.50"))
+    DEEPFACE_HOME = os.getenv("DEEPFACE_HOME", BASE_PATH)
+    DEEPFACE_WEIGHT_FILES = ("facenet512_weights.h5", "retinaface.h5")
+    
+    # ============ TRIPLE RIDING ============
+    TWO_WHEELER_CLASSES = {"motorcycle", "bike", "two_wheeler", "bicycle", "scooter", "rider"}
+    TRIPLE_RIDING_MIN_PERSONS = 3
     
     
     # ============ MODEL INFERENCE PARAMETERS ============
@@ -125,6 +138,20 @@ class Config:
     )
 
     @classmethod
+    def setup_deepface_home(cls):
+        """Use project-bundled DeepFace weights instead of downloading at runtime."""
+        os.environ.setdefault("DEEPFACE_HOME", cls.BASE_PATH)
+        weights_dir = os.path.join(cls.BASE_PATH, ".deepface", "weights")
+        os.makedirs(weights_dir, exist_ok=True)
+        for filename in cls.DEEPFACE_WEIGHT_FILES:
+            bundled = os.path.join(cls.BASE_PATH, filename)
+            target = os.path.join(weights_dir, filename)
+            if os.path.isfile(bundled) and not os.path.isfile(target):
+                shutil.copy2(bundled, target)
+
+    @classmethod
     def ensure_folders_exist(cls):
         """Ensure all required folders exist"""
         os.makedirs(cls.EVIDENCE_FOLDER, exist_ok=True)
+        os.makedirs(cls.FACE_DATABASE_FOLDER, exist_ok=True)
+        cls.setup_deepface_home()

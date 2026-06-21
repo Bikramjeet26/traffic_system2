@@ -10,3 +10,6 @@ node_modules/
 .next/
 out/
 EOF
+venv/
+.deepface/
+*.h5

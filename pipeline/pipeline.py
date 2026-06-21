@@ -12,7 +12,8 @@ from .utils import (
     image_bytes_to_numpy, numpy_to_jpeg_bytes, numpy_to_base64,
     denormalize_bboxes, draw_bounding_boxes, detect_3wheeler,
     validate_gps_timestamp, get_evidence_filename,
-    save_json_evidence, save_annotated_image, load_all_evidence
+    save_json_evidence, save_annotated_image, load_all_evidence,
+    count_boxes_inside,
 )
 
 
@@ -402,6 +403,62 @@ class TrafficViolationPipeline:
         except Exception as e:
             print(f"Error in global seatbelt detection: {e}")
 
+        # ===== TRIPLE RIDING ON TWO-WHEELERS =====
+        violations.extend(self.detect_triple_riding(image, vehicle_boxes))
+
+        return violations
+
+    def detect_triple_riding(self, image, vehicle_boxes=None):
+        """
+        Flag triple riding when 3+ persons are detected inside a two-wheeler bounding box.
+        Uses all helmet-model detections (any class) as person proxies on the vehicle.
+        """
+        if not vehicle_boxes:
+            return []
+
+        two_wheelers = [
+            v for v in vehicle_boxes
+            if v.get("class", "").lower() in Config.TWO_WHEELER_CLASSES
+        ]
+        if not two_wheelers:
+            return []
+
+        person_detections = []
+        try:
+            helmet_model = self.model_manager.load_helmet()
+            results = helmet_model.predict(
+                image,
+                conf=Config.CONFIDENCE_THRESHOLDS["helmet"],
+                verbose=False,
+            )
+            if results and len(results) > 0 and results[0].boxes is not None:
+                for box_obj in results[0].boxes:
+                    x1, y1, x2, y2 = box_obj.xyxy[0].cpu().numpy()
+                    person_detections.append({
+                        "box": [float(x1), float(y1), float(x2), float(y2)],
+                        "confidence": float(box_obj.conf.cpu().numpy()[0]),
+                    })
+        except Exception as e:
+            print(f"Error detecting persons for triple riding: {e}")
+            return []
+
+        violations = []
+        for vehicle in two_wheelers:
+            vbox = vehicle.get("box")
+            if not vbox or len(vbox) < 4:
+                continue
+
+            person_count = count_boxes_inside(vbox, person_detections)
+            if person_count >= Config.TRIPLE_RIDING_MIN_PERSONS:
+                violations.append({
+                    "type": "triple_riding",
+                    "box": [float(x) for x in vbox],
+                    "confidence": float(vehicle.get("confidence", 0.0)),
+                    "vehicle_class": vehicle.get("class", "unknown"),
+                    "vehicle_idx": None,
+                    "person_count": person_count,
+                })
+
         return violations
     
     # ============ METHOD 7: ANNOTATE IMAGE ============
@@ -502,7 +559,8 @@ class TrafficViolationPipeline:
                         "type": v["type"],
                         "vehicle_class": v.get("vehicle_class", "unknown"),
                         "confidence": float(v["confidence"]),
-                        "box": [float(x) for x in v["box"]]
+                        "box": [float(x) for x in v["box"]],
+                        **({"person_count": int(v["person_count"])} if "person_count" in v else {}),
                     }
                     for v in all_violations
                 ],

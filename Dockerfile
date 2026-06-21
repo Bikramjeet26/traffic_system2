@@ -19,6 +19,7 @@ COPY . .
 
 # Expose the API port (Hugging Face Spaces)
 ENV PORT=7860
+ENV DEEPFACE_HOME=/app
 EXPOSE 7860
 
 # Run the API with uvicorn

@@ -14,15 +14,14 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription
 } from '@/components/ui/dialog'
-import { fetchViolations, evidenceImageUrl, SWR_KEYS, type EvidenceRecord } from '@/lib/api'
+import { fetchViolations, evidenceImageUrl, violationLabel, SWR_KEYS, type EvidenceRecord } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 function ViolationTypeBadge({ type }: { type: string }) {
-  const label = type === 'no_helmet' ? 'No Helmet' : type === 'no_seatbelt' ? 'No Seatbelt' : type
   return (
     <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium bg-[--violation]/10 text-[--violation] border border-[--violation]/20">
       <ShieldAlert className="size-2.5" />
-      {label}
+      {violationLabel(type)}
     </span>
   )
 }
@@ -116,7 +115,7 @@ function EvidenceRow({ record }: { record: EvidenceRecord }) {
                     {record.violations.map((v, i) => (
                       <div key={i} className="flex items-center justify-between rounded bg-[--violation]/5 border border-[--violation]/10 px-2.5 py-1.5 text-xs">
                         <span className="text-[--violation] font-medium">
-                          {v.type === 'no_helmet' ? 'No Helmet' : v.type === 'no_seatbelt' ? 'No Seatbelt' : v.type}
+                          {violationLabel(v.type)}
                         </span>
                         <div className="flex items-center gap-3 text-muted-foreground">
                           <span>Vehicle: {v.vehicle_class}</span>

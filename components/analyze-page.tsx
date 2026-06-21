@@ -3,22 +3,21 @@
 import { useCallback, useRef, useState } from 'react'
 import {
   Upload, ImageIcon, Loader2, CheckCircle2, AlertCircle,
-  MapPin, Clock, Car, CreditCard, ShieldAlert, X
+  MapPin, Clock, Car, CreditCard, ShieldAlert, X, Crosshair, Users
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Progress } from '@/components/ui/progress'
-import { analyzeImage, evidenceImageUrl, type AnalyzeResponse } from '@/lib/api'
+import { analyzeImage, evidenceImageUrl, violationLabel, type AnalyzeResponse } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 function ViolationBadge({ type }: { type: string }) {
-  const label = type === 'no_helmet' ? 'No Helmet' : type === 'no_seatbelt' ? 'No Seatbelt' : type
   return (
     <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-[--violation]/15 text-[--violation] border border-[--violation]/20">
       <ShieldAlert className="size-3" />
-      {label}
+      {violationLabel(type)}
     </span>
   )
 }
@@ -41,6 +40,45 @@ export function AnalyzePage() {
   const [result, setResult] = useState<AnalyzeResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // GPS + time capture (stored client-side, sent with the analysis request)
+  const [gps, setGps] = useState<{ lat: number; lon: number } | null>(null)
+  const [capturedAt, setCapturedAt] = useState<string | null>(null)
+  const [geoStatus, setGeoStatus] = useState<'idle' | 'locating' | 'success' | 'error'>('idle')
+  const [geoError, setGeoError] = useState<string | null>(null)
+
+  const captureLocation = () => {
+    setGeoError(null)
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setGeoStatus('error')
+      setGeoError('Geolocation is not supported by this browser.')
+      return
+    }
+    setGeoStatus('locating')
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        setGps({ lat: pos.coords.latitude, lon: pos.coords.longitude })
+        setCapturedAt(new Date().toISOString())
+        setGeoStatus('success')
+      },
+      err => {
+        setGeoStatus('error')
+        setGeoError(
+          err.code === err.PERMISSION_DENIED
+            ? 'Location permission denied. Allow access to capture GPS.'
+            : 'Unable to retrieve your location.'
+        )
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    )
+  }
+
+  const clearLocation = () => {
+    setGps(null)
+    setCapturedAt(null)
+    setGeoStatus('idle')
+    setGeoError(null)
+  }
 
   const pickFile = (picked: File) => {
     setFile(picked)
@@ -81,8 +119,13 @@ export function AnalyzePage() {
     }, 600)
 
     try {
-      const ts = new Date().toISOString()
-      const data = await analyzeImage(file, { timestamp: ts })
+      // Use the captured timestamp if the user grabbed GPS, else current time
+      const ts = capturedAt ?? new Date().toISOString()
+      const data = await analyzeImage(file, {
+        timestamp: ts,
+        gpsLat: gps?.lat,
+        gpsLon: gps?.lon,
+      })
       setProgress(100)
       setResult(data)
     } catch (err: unknown) {
@@ -207,6 +250,79 @@ export function AnalyzePage() {
           </CardContent>
         </Card>
 
+        {/* Location & time capture */}
+        <Card className="bg-card border-border">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <MapPin className="size-4 text-primary" />
+              Location &amp; Time
+            </CardTitle>
+            <CardDescription className="text-muted-foreground text-sm">
+              Tag this evidence with your current GPS coordinates and capture time.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={captureLocation}
+                disabled={geoStatus === 'locating'}
+              >
+                {geoStatus === 'locating' ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" data-icon="inline-start" />
+                    Locating…
+                  </>
+                ) : (
+                  <>
+                    <Crosshair className="size-4" data-icon="inline-start" />
+                    {gps ? 'Update GPS & Time' : 'Capture GPS & Time'}
+                  </>
+                )}
+              </Button>
+              {gps && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={clearLocation}
+                  aria-label="Clear captured location"
+                >
+                  <X className="size-4" />
+                </Button>
+              )}
+            </div>
+
+            {geoError && (
+              <p className="text-xs text-destructive flex items-center gap-1.5">
+                <AlertCircle className="size-3.5 shrink-0" />
+                {geoError}
+              </p>
+            )}
+
+            {gps && (
+              <div className="flex flex-col gap-2 rounded-md bg-muted/30 border border-border px-3 py-2.5">
+                <div className="flex items-center gap-2 text-xs text-foreground">
+                  <MapPin className="size-3.5 text-primary shrink-0" />
+                  <span className="font-mono">{gps.lat.toFixed(6)}, {gps.lon.toFixed(6)}</span>
+                </div>
+                {capturedAt && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Clock className="size-3.5 shrink-0" />
+                    <span className="font-mono">{new Date(capturedAt).toLocaleString()}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!gps && !geoError && (
+              <p className="text-xs text-muted-foreground">
+                Optional — if skipped, the current time is used and GPS defaults to 0, 0.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
         {/* Pipeline steps info card */}
         <Card className="bg-card border-border">
           <CardContent className="pt-4">
@@ -217,6 +333,7 @@ export function AnalyzePage() {
                 { icon: CreditCard, label: 'License Plate OCR', desc: 'RapidOCR + YOLOv11' },
                 { icon: ShieldAlert, label: 'Helmet Compliance', desc: 'helmet_detection.pt' },
                 { icon: ShieldAlert, label: 'Seatbelt Compliance', desc: 'seatbelt_detection.pt' },
+                { icon: Users, label: 'Triple Riding', desc: '3+ riders on two-wheeler' },
               ].map(({ icon: Icon, label, desc }) => (
                 <div key={label} className="flex items-center gap-3">
                   <div className="flex size-7 shrink-0 items-center justify-center rounded bg-muted border border-border">
@@ -356,6 +473,12 @@ export function AnalyzePage() {
                           <div key={i} className="flex items-center justify-between rounded-md bg-muted/20 px-3 py-1.5 border border-border">
                             <ViolationBadge type={v.type} />
                             <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              {v.person_count != null && (
+                                <span className="flex items-center gap-1">
+                                  <Users className="size-3" />
+                                  {v.person_count}
+                                </span>
+                              )}
                               <Car className="size-3" />
                               <span>{v.vehicle_class}</span>
                               <Badge variant="outline" className="text-[10px] h-4 px-1.5 font-mono">

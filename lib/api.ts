@@ -16,11 +16,45 @@ export interface PlateDetection {
   box: [number, number, number, number]
 }
 
+export type ViolationType =
+  | 'no_helmet'
+  | 'no_seatbelt'
+  | 'triple_riding'
+  | 'red_light'
+  | 'stop_line'
+  | 'red_light_violation'
+  | 'stop_line_violation'
+  | (string & {})
+
 export interface ViolationDetection {
-  type: 'no_helmet' | 'no_seatbelt' | string
+  type: ViolationType
   vehicle_class: string
   confidence: number
   box: [number, number, number, number]
+  /** Present for triple_riding violations */
+  person_count?: number
+}
+
+/** Human-readable label for any violation type (shared across pages). */
+export function violationLabel(type: string): string {
+  switch (type) {
+    case 'no_helmet':
+      return 'No Helmet'
+    case 'no_seatbelt':
+      return 'No Seatbelt'
+    case 'triple_riding':
+      return 'Triple Riding'
+    case 'red_light':
+    case 'red_light_violation':
+      return 'Red Light'
+    case 'stop_line':
+    case 'stop_line_violation':
+      return 'Stop Line'
+    default:
+      return type
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase())
+  }
 }
 
 export interface EvidenceRecord {
@@ -132,6 +166,91 @@ export function evidenceImageUrl(annotatedImagePath: string): string {
 export function evidenceJsonUrl(timestamp: string): string {
   const safe = timestamp.replace(/:/g, '-')
   return `${API_BASE}/evidence/${encodeURIComponent(safe)}.json`
+}
+
+// ── Face Match (criminal detection) ──────────────────────────────────────────
+
+export interface FaceMatchEntry {
+  similarity: number
+  distance: number
+  is_match?: boolean
+  face_index?: number | null
+  box?: [number, number, number, number] | null
+}
+
+export interface FaceCompareResult {
+  success: boolean
+  mode: 'image_to_image'
+  is_match: boolean
+  threshold?: number
+  faces_in_person?: number
+  faces_in_target?: number
+  best_match?: FaceMatchEntry | null
+  all_matches?: FaceMatchEntry[]
+  error?: string
+}
+
+export interface ViolationSummary {
+  timestamp: string
+  gps: { latitude: number | null; longitude: number | null }
+  violations_count: number
+  plates_count: number
+  annotated_image_path?: string | null
+}
+
+export interface FaceScanMatch {
+  violation: ViolationSummary
+  is_match: boolean
+  similarity: number
+  distance: number
+  face_index?: number | null
+  box?: [number, number, number, number] | null
+  faces_in_violation?: number
+}
+
+export interface FaceScanResult {
+  success: boolean
+  mode: 'violation_database_scan' | 'violation_record'
+  is_match: boolean
+  threshold?: number
+  total_violations_scanned?: number
+  total_violations_skipped?: number
+  matches_found?: number
+  best_match?: FaceScanMatch | FaceMatchEntry | null
+  all_results?: FaceScanMatch[]
+  positive_matches?: FaceScanMatch[]
+  violation?: ViolationSummary
+  faces_in_target?: number
+  error?: string
+}
+
+/** Mode 1: compare a reference person image against a target image. */
+export async function faceMatchCompare(
+  personImage: File,
+  targetImage: File
+): Promise<FaceCompareResult> {
+  const form = new FormData()
+  form.append('person_image', personImage)
+  form.append('target_image', targetImage)
+  return apiFetch<FaceCompareResult>('/face-match/compare', { method: 'POST', body: form })
+}
+
+/**
+ * Mode 2/3: compare a reference person against a stored violation by id,
+ * or scan the entire violation database for a match.
+ */
+export async function faceMatchViolation(
+  personImage: File,
+  opts: { violationId?: string; scanAll?: boolean }
+): Promise<FaceScanResult> {
+  const form = new FormData()
+  form.append('person_image', personImage)
+  if (opts.scanAll) {
+    form.append('scan_all_violations', 'true')
+  } else if (opts.violationId) {
+    form.append('violation_id', opts.violationId)
+  }
+  return apiFetch<FaceScanResult>('/face-match/violation', { method: 'POST', body: form })
 }
 
 // SWR key factories (prevents magic strings across components)

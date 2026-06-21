@@ -256,6 +256,25 @@ def validate_gps_timestamp(timestamp_str, gps_tuple):
         return False, str(e)
 
 
+def box_center_inside(inner_box, outer_box):
+    """True when the center of inner_box lies inside outer_box."""
+    if not inner_box or not outer_box or len(inner_box) < 4 or len(outer_box) < 4:
+        return False
+    cx = (inner_box[0] + inner_box[2]) / 2.0
+    cy = (inner_box[1] + inner_box[3]) / 2.0
+    return outer_box[0] <= cx <= outer_box[2] and outer_box[1] <= cy <= outer_box[3]
+
+
+def count_boxes_inside(outer_box, detections):
+    """Count detection boxes whose center falls inside outer_box."""
+    count = 0
+    for detection in detections:
+        box = detection.get("box") if isinstance(detection, dict) else detection
+        if box and box_center_inside(box, outer_box):
+            count += 1
+    return count
+
+
 # ============ EVIDENCE FILE HANDLING ============
 
 def get_evidence_filename(timestamp_str):

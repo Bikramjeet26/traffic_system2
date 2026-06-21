@@ -4,8 +4,9 @@ import { Navbar } from '@/components/navbar'
 import { AnalyzePage } from '@/components/analyze-page'
 import { ViolationsPage } from '@/components/violations-page'
 import { StatsPage } from '@/components/stats-page'
+import { FaceMatchPage } from '@/components/face-match-page'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ScanLine, ListFilter, BarChart3 } from 'lucide-react'
+import { ScanLine, ListFilter, BarChart3, ScanFace } from 'lucide-react'
 import { API_BASE } from '@/lib/api'
 
 export default function Home() {
@@ -41,6 +42,13 @@ export default function Home() {
               Violations Log
             </TabsTrigger>
             <TabsTrigger
+              value="face-match"
+              className="flex items-center gap-1.5 text-xs h-8 px-3 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-md"
+            >
+              <ScanFace className="size-3.5" />
+              Face Match
+            </TabsTrigger>
+            <TabsTrigger
               value="stats"
               className="flex items-center gap-1.5 text-xs h-8 px-3 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-md"
             >
@@ -55,6 +63,10 @@ export default function Home() {
 
           <TabsContent value="violations">
             <ViolationsPage />
+          </TabsContent>
+
+          <TabsContent value="face-match">
+            <FaceMatchPage />
           </TabsContent>
 
           <TabsContent value="stats">

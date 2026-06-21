@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
-import { fetchStats, SWR_KEYS } from '@/lib/api'
+import { fetchStats, violationLabel, SWR_KEYS } from '@/lib/api'
 
 function StatCard({
   icon: Icon,
@@ -58,9 +58,6 @@ export function StatsPage() {
 
   const maxViolation = violationEntries[0]?.[1] ?? 1
   const maxVehicle = vehicleEntries[0]?.[1] ?? 1
-
-  const violationLabel = (key: string) =>
-    key === 'no_helmet' ? 'No Helmet' : key === 'no_seatbelt' ? 'No Seatbelt' : key
 
   return (
     <div className="flex flex-col gap-6">
