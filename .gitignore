@@ -13,3 +13,4 @@ EOF
 venv/
 .deepface/
 *.h5
+traffic3/
