@@ -924,10 +924,23 @@ export function AnalyzePage() {
                   </CardHeader>
                   <CardContent className="p-0">
                     <video
+                      key={annotatedVideoSrc}
                       src={annotatedVideoSrc}
                       controls
+                      playsInline
+                      preload="metadata"
                       className="w-full max-h-[360px] bg-black object-contain"
                     />
+                    <div className="px-4 py-2 border-t border-border">
+                      <a
+                        href={annotatedVideoSrc}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-primary hover:underline"
+                      >
+                        Open video in new tab
+                      </a>
+                    </div>
                   </CardContent>
                 </Card>
               )}

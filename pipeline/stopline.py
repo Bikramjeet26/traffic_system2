@@ -20,6 +20,47 @@ from .models import ModelManager
 Point = Tuple[float, float]
 BBox = Tuple[float, float, float, float]
 
+
+def _transcode_to_h264(src_path: str) -> bool:
+    """
+    Re-encode a video to browser-compatible H.264 (yuv420p) + faststart in-place.
+
+    OpenCV's VideoWriter with the 'mp4v' fourcc produces MPEG-4 Part 2 video, which
+    HTML5 <video> elements cannot decode (the player loads but stays black). We use
+    the static ffmpeg binary bundled with imageio-ffmpeg so no system ffmpeg/codec
+    install is required. Returns True on success, False if transcoding was skipped.
+    """
+    try:
+        import subprocess
+        import imageio_ffmpeg
+
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        tmp_out = src_path + ".h264.mp4"
+
+        cmd = [
+            ffmpeg_exe, "-y",
+            "-i", src_path,
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-preset", "veryfast",
+            "-movflags", "+faststart",
+            "-an",
+            tmp_out,
+        ]
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if proc.returncode == 0 and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
+            os.replace(tmp_out, src_path)
+            return True
+
+        # transcode failed; clean up and keep original
+        if os.path.exists(tmp_out):
+            os.remove(tmp_out)
+        print(f"[stopline] ffmpeg transcode failed (rc={proc.returncode}): {proc.stderr.decode(errors='ignore')[:500]}")
+        return False
+    except Exception as e:
+        print(f"[stopline] H.264 transcode skipped: {e}")
+        return False
+
 # --- Minimal geometry / tracker / detector (adapted from script) ---
 
 def bottom_center(bbox: BBox) -> Point:
@@ -307,6 +348,10 @@ def process_video_headless(
 
         writer.release()
         cap.release()
+
+        # Re-encode the mp4v output to browser-playable H.264 so the annotated
+        # video can be streamed directly into an HTML5 <video> element.
+        _transcode_to_h264(output_video_path)
 
         # prepare results json
         results = {
