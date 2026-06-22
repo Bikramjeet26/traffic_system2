@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import type { HeatmapPoint } from '@/lib/api'
+import { evidenceAssetUrl, type HeatmapPoint } from '@/lib/api'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 
 interface HeatmapProps {
@@ -41,6 +41,9 @@ export function Heatmap({ points, isLoading = false }: HeatmapProps) {
             maxZoom: 19,
           }).addTo(leafletMapRef.current)
         }
+
+        // Ensure the map fills its container (fixes partial/centered tile render)
+        setTimeout(() => leafletMapRef.current?.invalidateSize(), 0)
 
         // Convert points to heatmap format
         const validPoints = points.filter(p => !(p.lat === 0 && p.lon === 0))
@@ -83,7 +86,7 @@ export function Heatmap({ points, isLoading = false }: HeatmapProps) {
               <p><strong>Violations:</strong> ${point.violation_count}</p>
               <p><strong>Types:</strong> ${point.violation_types.join(', ') || 'N/A'}</p>
               <p><strong>Time:</strong> ${new Date(point.timestamp).toLocaleString()}</p>
-              ${point.image_url ? `<img src="${point.image_url}" style="width: 100%; margin-top: 8px; border-radius: 4px; max-height: 150px;" />` : ''}
+              ${point.image_url ? `<img src="${evidenceAssetUrl(point.image_url)}" style="width: 100%; margin-top: 8px; border-radius: 4px; max-height: 150px;" />` : ''}
             </div>
           `
           circle.bindPopup(popupContent)
@@ -133,20 +136,24 @@ export function Heatmap({ points, isLoading = false }: HeatmapProps) {
           GPS distribution of traffic violations. Circle size and color indicate violation frequency.
         </CardDescription>
       </CardHeader>
-      <CardContent className="p-0 h-[500px]">
-        <div
-          ref={mapRef}
-          className="h-full w-full bg-muted"
-          style={{ position: 'relative' }}
-        >
+      <CardContent className="p-0">
+        <div className="relative h-[500px] w-full">
+          <div ref={mapRef} className="absolute inset-0 bg-muted" />
           {isLoading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10 pointer-events-none">
+            <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-[400] pointer-events-none">
               <div className="text-white text-sm">Loading map data...</div>
             </div>
           )}
           {points.filter(p => !(p.lat === 0 && p.lon === 0)).length === 0 && !isLoading && (
-            <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-              <div className="text-muted-foreground text-sm">No violation data to display</div>
+            <div className="absolute inset-0 flex items-center justify-center z-[400] pointer-events-none px-6">
+              <div className="bg-card/90 border border-border rounded-md px-4 py-3 text-center max-w-xs shadow-lg">
+                <p className="text-sm font-medium text-foreground">No GPS-tagged violations</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {points.length > 0
+                    ? `${points.length} violation${points.length === 1 ? '' : 's'} recorded without GPS coordinates`
+                    : 'Violation locations will appear here once captured'}
+                </p>
+              </div>
             </div>
           )}
         </div>

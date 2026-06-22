@@ -51,7 +51,7 @@ export function StatsPage() {
 
   const { data: heatmapPoints, isLoading: heatmapLoading } = useSWR(
     'heatmap-points',
-    () => fetchHeatmapPoints(false),
+    () => fetchHeatmapPoints(true),
     { refreshInterval: 60000 }
   )
 
