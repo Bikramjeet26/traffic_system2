@@ -72,62 +72,110 @@ class FaceRecognitionProcessor:
             return decoded
         return image
 
+    # def extract_faces(
+    #     self,
+    #     image: Union[str, np.ndarray, bytes],
+    #     enforce_detection: bool = False,
+    # ) -> List[Dict[str, Any]]:
+    #     """
+    #     Detect all faces and return bounding boxes with 512-d embeddings.
+
+    #     Returns:
+    #         [{"box": [x1,y1,x2,y2], "embedding": [...], "face_index": 0}, ...]
+    #     """
+    #     try:
+    #         img = self._prepare_image_input(image)
+    #         face_objs = _deepface().extract_faces(
+    #             img_path=img,
+    #             detector_backend=Config.FACE_DETECTOR,
+    #             enforce_detection=enforce_detection,
+    #             align=True,
+    #         )
+    #     except Exception as e:
+    #         print(f"Face extraction failed: {e}")
+    #         return []
+
+    #     results: List[Dict[str, Any]] = []
+    #     for idx, face_obj in enumerate(face_objs):
+    #         try:
+    #             facial_area = face_obj.get("facial_area", {})
+    #             x = facial_area.get("x", 0)
+    #             y = facial_area.get("y", 0)
+    #             w = facial_area.get("w", 0)
+    #             h = facial_area.get("h", 0)
+    #             box = [int(x), int(y), int(x + w), int(y + h)]
+
+    #             face_img = face_obj.get("face")
+    #             if face_img is None:
+    #                 continue
+
+    #             embedding_objs = _deepface().represent(
+    #                 img_path=face_img,
+    #                 model_name=Config.FACE_MODEL,
+    #                 enforce_detection=False,
+    #             )
+    #             if not embedding_objs:
+    #                 continue
+
+    #             results.append(
+    #                 {
+    #                     "box": box,
+    #                     "embedding": embedding_objs[0]["embedding"],
+    #                     "face_index": idx,
+    #                 }
+    #             )
+    #         except Exception:
+    #             continue
+
+    #     return results
+
     def extract_faces(
-        self,
-        image: Union[str, np.ndarray, bytes],
-        enforce_detection: bool = False,
-    ) -> List[Dict[str, Any]]:
-        """
-        Detect all faces and return bounding boxes with 512-d embeddings.
+            self,
+            image: Union[str, np.ndarray, bytes],
+            enforce_detection: bool = False,
+        ) -> List[Dict[str, Any]]:
+            """
+            Detect all faces and return bounding boxes with 512-d embeddings.
 
-        Returns:
-            [{"box": [x1,y1,x2,y2], "embedding": [...], "face_index": 0}, ...]
-        """
-        try:
-            img = self._prepare_image_input(image)
-            face_objs = _deepface().extract_faces(
-                img_path=img,
-                detector_backend=Config.FACE_DETECTOR,
-                enforce_detection=enforce_detection,
-                align=True,
-            )
-        except Exception as e:
-            print(f"Face extraction failed: {e}")
-            return []
-
-        results: List[Dict[str, Any]] = []
-        for idx, face_obj in enumerate(face_objs):
+            Returns:
+                [{"box": [x1,y1,x2,y2], "embedding": [...], "face_index": 0}, ...]
+            """
             try:
-                facial_area = face_obj.get("facial_area", {})
-                x = facial_area.get("x", 0)
-                y = facial_area.get("y", 0)
-                w = facial_area.get("w", 0)
-                h = facial_area.get("h", 0)
-                box = [int(x), int(y), int(x + w), int(y + h)]
-
-                face_img = face_obj.get("face")
-                if face_img is None:
-                    continue
-
+                img = self._prepare_image_input(image)
+                # Call represent directly on the full image to get all embeddings correctly
                 embedding_objs = _deepface().represent(
-                    img_path=face_img,
+                    img_path=img,
                     model_name=Config.FACE_MODEL,
-                    enforce_detection=False,
+                    detector_backend=Config.FACE_DETECTOR,
+                    enforce_detection=enforce_detection,
                 )
-                if not embedding_objs:
+            except Exception as e:
+                print(f"Face extraction failed: {e}")
+                return []
+
+            results: List[Dict[str, Any]] = []
+            for idx, emb_obj in enumerate(embedding_objs):
+                try:
+                    facial_area = emb_obj.get("facial_area", {})
+                    x = facial_area.get("x", 0)
+                    y = facial_area.get("y", 0)
+                    w = facial_area.get("w", 0)
+                    h = facial_area.get("h", 0)
+                    box = [int(x), int(y), int(x + w), int(y + h)]
+
+                    results.append(
+                        {
+                            "box": box,
+                            "embedding": emb_obj["embedding"],
+                            "face_index": idx,
+                        }
+                    )
+                except Exception as e:
+                    print(f"Error processing face item {idx}: {e}")
                     continue
 
-                results.append(
-                    {
-                        "box": box,
-                        "embedding": embedding_objs[0]["embedding"],
-                        "face_index": idx,
-                    }
-                )
-            except Exception:
-                continue
+            return results
 
-        return results
 
     def get_primary_embedding(
         self,
