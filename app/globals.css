@@ -128,4 +128,32 @@
   html {
     @apply font-sans;
   }
+
+  /* Leaflet map container sizing */
+  .leaflet-container {
+    @apply w-full h-full;
+    font-family: inherit;
+    z-index: 1;
+  }
+
+  .leaflet-popup-content-wrapper,
+  .leaflet-popup-tip {
+    background-color: oklch(0.14 0.01 240);
+    color: oklch(0.93 0.005 240);
+    border-radius: 0.375rem;
+  }
+
+  .leaflet-popup-content {
+    @apply text-sm;
+  }
+
+  .leaflet-control {
+    background-color: oklch(0.14 0.01 240);
+    border: 1px solid oklch(1 0 0 / 8%);
+    border-radius: 0.375rem;
+  }
+
+  .leaflet-control-layers-toggle {
+    background-color: oklch(0.16 0.01 240);
+  }
 }

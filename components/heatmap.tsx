@@ -24,12 +24,16 @@ export function Heatmap({ points, isLoading = false }: HeatmapProps) {
 
     const initializeMap = async () => {
       try {
+        // Import Leaflet CSS first
+        await import('leaflet/dist/leaflet.css')
         const L = (await import('leaflet')).default
 
         // Initialize map if not already done
         if (!leafletMapRef.current) {
           // Default center (India)
-          leafletMapRef.current = L.map(mapRef.current).setView([28.6139, 77.209], 12)
+          leafletMapRef.current = L.map(mapRef.current, {
+            preferCanvas: true,
+          }).setView([28.6139, 77.209], 12)
 
           // Add tile layer
           L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -129,10 +133,10 @@ export function Heatmap({ points, isLoading = false }: HeatmapProps) {
           GPS distribution of traffic violations. Circle size and color indicate violation frequency.
         </CardDescription>
       </CardHeader>
-      <CardContent className="p-0">
+      <CardContent className="p-0 h-[500px]">
         <div
           ref={mapRef}
-          className="h-[500px] w-full bg-muted"
+          className="h-full w-full bg-muted"
           style={{ position: 'relative' }}
         >
           {isLoading && (
