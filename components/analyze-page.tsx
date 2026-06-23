@@ -70,7 +70,7 @@ function ModeToggle({
         onClick={() => onChange('video')}
       >
         <Video className="size-3.5" />
-        Video Stop Line
+        Video Stop / Red Light
       </Button>
     </div>
   )
@@ -220,7 +220,7 @@ export function AnalyzePage() {
     setVideoReady(true)
   }
 
-  const handleStopLineClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  const handleLineClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const video = videoRef.current
     if (!video || !video.videoWidth || loading) return
 
@@ -234,16 +234,19 @@ export function AnalyzePage() {
     }
 
     setStopLinePoints(prev => {
-      if (prev.length >= 2) return [point]
+      if (prev.length >= 4) return [point]
       return [...prev, point]
     })
   }
 
   const clearStopLine = () => setStopLinePoints([])
 
-  const stopLineComplete = stopLinePoints.length === 2
-  const stopLineNorm: [number, number, number, number] | null = stopLineComplete
+  const linesComplete = stopLinePoints.length === 4
+  const stopLineNorm: [number, number, number, number] | null = linesComplete
     ? [stopLinePoints[0].x, stopLinePoints[0].y, stopLinePoints[1].x, stopLinePoints[1].y]
+    : null
+  const redLightLineNorm: [number, number, number, number] | null = linesComplete
+    ? [stopLinePoints[2].x, stopLinePoints[2].y, stopLinePoints[3].x, stopLinePoints[3].y]
     : null
 
   const runImageAnalysis = async () => {
@@ -274,7 +277,7 @@ export function AnalyzePage() {
   }
 
   const runVideoAnalysis = async () => {
-    if (!videoFile || !stopLineNorm) return
+    if (!videoFile || !stopLineNorm || !redLightLineNorm) return
     setLoading(true)
     resetShared()
     setProgress(5)
@@ -286,6 +289,7 @@ export function AnalyzePage() {
     try {
       const data = await analyzeVideo(videoFile, {
         stopLine: stopLineNorm,
+        redLightLine: redLightLineNorm,
         initialLightState: lightState,
       })
       setProgress(100)
@@ -421,10 +425,10 @@ export function AnalyzePage() {
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <Video className="size-4 text-primary" />
-                  Upload Video &amp; Draw Stop Line
+                  Upload Video &amp; Draw Lines
                 </CardTitle>
                 <CardDescription className="text-muted-foreground text-sm">
-                  Upload a traffic video, click two points on the first frame to set the stop line, then run detection.
+                  Upload a traffic video, click four points on the first frame (stop line then red light line), then run detection.
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-4">
@@ -454,7 +458,7 @@ export function AnalyzePage() {
                     <>
                       <div
                         className="relative w-full cursor-crosshair"
-                        onClick={handleStopLineClick}
+                        onClick={handleLineClick}
                         role="presentation"
                       >
                         <video
@@ -477,12 +481,12 @@ export function AnalyzePage() {
                                 cx={p.x * 100}
                                 cy={p.y * 100}
                                 r={0.8}
-                                fill="#22c55e"
+                                fill={i < 2 ? '#22c55e' : '#ef4444'}
                                 stroke="white"
                                 strokeWidth={0.15}
                               />
                             ))}
-                            {stopLinePoints.length === 2 && (
+                            {stopLinePoints.length >= 2 && (
                               <line
                                 x1={stopLinePoints[0].x * 100}
                                 y1={stopLinePoints[0].y * 100}
@@ -492,12 +496,25 @@ export function AnalyzePage() {
                                 strokeWidth={0.35}
                               />
                             )}
+                            {stopLinePoints.length === 4 && (
+                              <line
+                                x1={stopLinePoints[2].x * 100}
+                                y1={stopLinePoints[2].y * 100}
+                                x2={stopLinePoints[3].x * 100}
+                                y2={stopLinePoints[3].y * 100}
+                                stroke="#ef4444"
+                                strokeWidth={0.35}
+                              />
+                            )}
                           </svg>
                         )}
-                        {!stopLineComplete && videoReady && (
+                        {!linesComplete && videoReady && (
                           <div className="absolute bottom-2 left-2 right-2 rounded bg-black/60 px-2 py-1 text-[11px] text-white text-center">
-                            Click two points on the frame to draw the stop line
-                            {stopLinePoints.length === 1 ? ' (1/2)' : ''}
+                            {stopLinePoints.length < 2
+                              ? `Click 2 points for stop line (${stopLinePoints.length}/2)`
+                              : stopLinePoints.length < 4
+                                ? `Click 2 points for red light line (${stopLinePoints.length - 2}/2)`
+                                : ''}
                           </div>
                         )}
                       </div>
@@ -566,7 +583,7 @@ export function AnalyzePage() {
                     disabled={stopLinePoints.length === 0 || loading}
                   >
                     <RotateCcw className="size-3.5" />
-                    Clear Line
+                    Clear Lines
                   </Button>
                   <Button
                     type="button"
@@ -594,7 +611,7 @@ export function AnalyzePage() {
                 <Button
                   className="w-full"
                   onClick={runVideoAnalysis}
-                  disabled={!videoFile || !stopLineComplete || !videoReady || loading}
+                  disabled={!videoFile || !linesComplete || !videoReady || loading}
                 >
                   {loading ? (
                     <>
@@ -604,7 +621,7 @@ export function AnalyzePage() {
                   ) : (
                     <>
                       <Minus className="size-4" data-icon="inline-start" />
-                      Run Stop Line Detection
+                      Run Detection
                     </>
                   )}
                 </Button>
@@ -716,12 +733,12 @@ export function AnalyzePage() {
           {mode === 'video' && (
             <Card className="bg-card border-border">
               <CardContent className="pt-4">
-                <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">Stop Line Pipeline</p>
+                <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">Stop Line &amp; Red Light Pipeline</p>
                 <div className="flex flex-col gap-2 text-xs text-muted-foreground">
                   <p>1. Upload a traffic video (MP4 recommended).</p>
-                  <p>2. Click two points on the paused first frame to set the stop line.</p>
-                  <p>3. Set traffic light to Red or Green for the full clip.</p>
-                  <p>4. Run detection — vehicles crossing the line on red are flagged.</p>
+                  <p>2. Click two points for the stop line, then two for the red light line.</p>
+                  <p>3. Set traffic light state for the clip.</p>
+                  <p>4. Run detection — stop line and red light crossings are flagged.</p>
                 </div>
               </CardContent>
             </Card>
@@ -760,7 +777,7 @@ export function AnalyzePage() {
                   <Video className="size-7 text-muted-foreground" />
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Upload a video, draw the stop line, and run detection to see annotated output here.
+                  Upload a video, draw both lines, and run detection to see annotated output here.
                 </p>
               </div>
             </Card>
@@ -888,11 +905,21 @@ export function AnalyzePage() {
 
           {mode === 'video' && videoResult && (
             <>
-              <div className="grid grid-cols-2 gap-3">
+              {(() => {
+                const stopLineCount = videoResult.violations.filter(v => v.type === 'stop_line_violation').length
+                const redLightCount = videoResult.violations.filter(v => v.type === 'red_light_violation').length
+                return (
+              <div className="grid grid-cols-3 gap-3">
                 <Card className="bg-card border-border">
                   <CardContent className="pt-4 pb-3 text-center">
-                    <p className="text-2xl font-bold text-foreground">{videoResult.violations_count}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">Stop Line Violations</p>
+                    <p className="text-2xl font-bold text-foreground">{stopLineCount}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Stop Line</p>
+                  </CardContent>
+                </Card>
+                <Card className="bg-card border-border">
+                  <CardContent className="pt-4 pb-3 text-center">
+                    <p className="text-2xl font-bold text-foreground">{redLightCount}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Red Light</p>
                   </CardContent>
                 </Card>
                 <Card className={cn(
@@ -908,11 +935,13 @@ export function AnalyzePage() {
                         : <CheckCircle2 className="size-5 text-[--safe]" />}
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      {videoResult.violations_count > 0 ? 'Violations Found' : 'No Violations'}
+                      {videoResult.violations_count > 0 ? `${videoResult.violations_count} Total` : 'No Violations'}
                     </p>
                   </CardContent>
                 </Card>
               </div>
+                )
+              })()}
 
               {annotatedVideoSrc && (
                 <Card className="bg-card border-border overflow-hidden">
@@ -959,7 +988,7 @@ export function AnalyzePage() {
                             className="flex items-center justify-between rounded-md bg-[--violation]/5 px-3 py-2 border border-[--violation]/15 text-xs"
                           >
                             <div className="flex items-center gap-2">
-                              <ViolationBadge type="stop_line_violation" />
+                              <ViolationBadge type={v.type ?? 'stop_line_violation'} />
                               <span className="text-muted-foreground">Track #{v.track_id}</span>
                             </div>
                             <div className="flex items-center gap-2 text-muted-foreground font-mono">
@@ -974,7 +1003,7 @@ export function AnalyzePage() {
                     </>
                   ) : (
                     <p className="text-sm text-muted-foreground">
-                      No vehicles crossed the stop line while the light was red.
+                      No stop line or red light violations detected.
                     </p>
                   )}
 

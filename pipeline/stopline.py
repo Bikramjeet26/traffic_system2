@@ -1,5 +1,5 @@
 """
-Headless stop-line video processing helper.
+Headless stop-line and red-light video processing helper.
 Provides process_video_headless(...) to run detections on a video file without GUI.
 Writes annotated video and a JSON results file into the Config.EVIDENCE_FOLDER and
 returns the results dictionary.
@@ -19,6 +19,13 @@ from .models import ModelManager
 
 Point = Tuple[float, float]
 BBox = Tuple[float, float, float, float]
+
+COLOR_GREEN = (0, 255, 0)
+COLOR_ORANGE = (0, 165, 255)
+COLOR_RED = (0, 0, 255)
+COLOR_STOP_LINE = (0, 255, 0)
+COLOR_RED_LIGHT_LINE = (255, 0, 0)
+COLOR_TEXT = (255, 255, 255)
 
 
 def _transcode_to_h264(src_path: str) -> bool:
@@ -52,7 +59,6 @@ def _transcode_to_h264(src_path: str) -> bool:
             os.replace(tmp_out, src_path)
             return True
 
-        # transcode failed; clean up and keep original
         if os.path.exists(tmp_out):
             os.remove(tmp_out)
         print(f"[stopline] ffmpeg transcode failed (rc={proc.returncode}): {proc.stderr.decode(errors='ignore')[:500]}")
@@ -61,7 +67,6 @@ def _transcode_to_h264(src_path: str) -> bool:
         print(f"[stopline] H.264 transcode skipped: {e}")
         return False
 
-# --- Minimal geometry / tracker / detector (adapted from script) ---
 
 def bottom_center(bbox: BBox) -> Point:
     x1, y1, x2, y2 = bbox
@@ -102,6 +107,51 @@ def segments_intersect(p1: Point, p2: Point, q1: Point, q2: Point) -> bool:
 
 def point_side_of_line(pt: Point, a: Point, b: Point) -> float:
     return (b[0] - a[0]) * (pt[1] - a[1]) - (b[1] - a[1]) * (pt[0] - a[0])
+
+
+def _line_crossed(prev_pt: Point, curr_pt: Point, line_p1: Point, line_p2: Point) -> bool:
+    crossed = segments_intersect(prev_pt, curr_pt, line_p1, line_p2)
+    prev_side = point_side_of_line(prev_pt, line_p1, line_p2)
+    curr_side = point_side_of_line(curr_pt, line_p1, line_p2)
+    side_changed = prev_side * curr_side < 0
+    return crossed or side_changed
+
+
+def draw_info(
+    frame,
+    stop_line: Optional[Tuple[Point, Point]],
+    red_light_line: Optional[Tuple[Point, Point]],
+    light_state: str,
+    violations_on_frame: List[Dict],
+):
+    if stop_line is not None:
+        p1, p2 = stop_line
+        cv2.line(frame, (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])), COLOR_STOP_LINE, 2)
+        cv2.putText(
+            frame, "Stop Line",
+            (int((p1[0] + p2[0]) / 2), int((p1[1] + p2[1]) / 2) - 10),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.7, COLOR_STOP_LINE, 2,
+        )
+
+    if red_light_line is not None:
+        p1, p2 = red_light_line
+        cv2.line(frame, (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])), COLOR_RED_LIGHT_LINE, 2)
+        cv2.putText(
+            frame, "Red Light Line",
+            (int((p1[0] + p2[0]) / 2), int((p1[1] + p2[1]) / 2) - 10),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.7, COLOR_RED_LIGHT_LINE, 2,
+        )
+
+    cv2.putText(
+        frame, f"Light: {(light_state or 'red').upper()}",
+        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1.0, COLOR_TEXT, 2, cv2.LINE_AA,
+    )
+
+    for violation in violations_on_frame:
+        if violation['type'] == 'stop_line_violation':
+            cv2.putText(frame, "STOP LINE VIOLATION!", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.0, COLOR_ORANGE, 3)
+        elif violation['type'] == 'red_light_violation':
+            cv2.putText(frame, "RED LIGHT VIOLATION!", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.0, COLOR_RED, 3)
 
 
 class SimpleTracker:
@@ -162,7 +212,10 @@ class SimpleTracker:
                     'last_frame': frame_idx,
                     'missed': 0,
                     'violated': False,
-                    'history': []
+                    'violation_type': None,
+                    'stop_line_crossed': False,
+                    'red_light_crossed': False,
+                    'history': [],
                 }
                 assigned[tid] = det
                 used_track_ids.add(tid)
@@ -187,8 +240,14 @@ class SimpleTracker:
 
 
 class StopLineViolationDetector:
-    def __init__(self, stop_line: Tuple[Point, Point], max_track_distance=80):
-        self.line_p1, self.line_p2 = stop_line
+    def __init__(
+        self,
+        stop_line: Tuple[Point, Point],
+        red_light_line: Tuple[Point, Point],
+        max_track_distance=80,
+    ):
+        self.stop_line_p1, self.stop_line_p2 = stop_line
+        self.red_light_line_p1, self.red_light_line_p2 = red_light_line
         self.tracker = SimpleTracker(max_distance=max_track_distance)
         self.violations = {}
 
@@ -196,70 +255,92 @@ class StopLineViolationDetector:
         state = (light_state or '').strip().lower()
         assigned = self.tracker.update(detections, frame_idx)
         new_violations = []
+
         for tid, det in assigned.items():
             track = self.tracker.tracks[tid]
             hist = track['history']
             if len(hist) < 2:
                 continue
+
             _, prev_bbox, _ = hist[-2]
             prev_pt = bottom_center(prev_bbox)
             curr_pt = bottom_center(hist[-1][1])
-            if track.get('violated', False):
-                continue
-            crossed_segment = segments_intersect(prev_pt, curr_pt, self.line_p1, self.line_p2)
-            prev_side = point_side_of_line(prev_pt, self.line_p1, self.line_p2)
-            curr_side = point_side_of_line(curr_pt, self.line_p1, self.line_p2)
-            side_changed = prev_side * curr_side < 0
-            if crossed_segment or side_changed:
-                if state == 'red':
-                    ev = {
-                        'track_id': tid,
-                        'frame_idx': frame_idx,
-                        'bbox': det['bbox'],
-                        'prev_point': prev_pt,
-                        'curr_point': curr_pt,
-                        'light_state': state,
-                        'type': 'stop_line_violation'
-                    }
-                    self.violations[tid] = ev
-                    track['violated'] = True
-                    new_violations.append(ev)
-                else:
-                    track['violated'] = False
+
+            stop_line_crossed = _line_crossed(prev_pt, curr_pt, self.stop_line_p1, self.stop_line_p2)
+            red_line_crossed = _line_crossed(prev_pt, curr_pt, self.red_light_line_p1, self.red_light_line_p2)
+
+            if stop_line_crossed and not track.get('stop_line_crossed', False):
+                track['stop_line_crossed'] = True
+                ev = {
+                    'track_id': tid,
+                    'frame_idx': frame_idx,
+                    'bbox': det['bbox'],
+                    'prev_point': prev_pt,
+                    'curr_point': curr_pt,
+                    'light_state': state,
+                    'type': 'stop_line_violation',
+                }
+                self.violations[tid] = ev
+                track['violated'] = True
+                track['violation_type'] = 'stop_line_violation'
+                new_violations.append(ev)
+
+            elif track.get('stop_line_crossed', False) and red_line_crossed and not track.get('red_light_crossed', False):
+                track['red_light_crossed'] = True
+                ev = {
+                    'track_id': tid,
+                    'frame_idx': frame_idx,
+                    'bbox': det['bbox'],
+                    'prev_point': prev_pt,
+                    'curr_point': curr_pt,
+                    'light_state': state,
+                    'type': 'red_light_violation',
+                }
+                self.violations[tid] = ev
+                track['violated'] = True
+                track['violation_type'] = 'red_light_violation'
+                new_violations.append(ev)
+
         return new_violations
 
 
-# --- Video processing function ---
+def _norm_line_to_abs(
+    line_norm: Tuple[float, float, float, float],
+    width: int,
+    height: int,
+) -> Tuple[Point, Point]:
+    x1 = int(line_norm[0] * width)
+    y1 = int(line_norm[1] * height)
+    x2 = int(line_norm[2] * width)
+    y2 = int(line_norm[3] * height)
+    return ((x1, y1), (x2, y2))
+
 
 def process_video_headless(
     video_path: str,
     model_path: Optional[str] = None,
     stop_line_norm: Optional[Tuple[float, float, float, float]] = None,
+    red_light_line_norm: Optional[Tuple[float, float, float, float]] = None,
     initial_light_state: str = 'red',
     conf_thres: float = 0.3,
     output_basename: Optional[str] = None,
 ) -> Dict:
     """
     Process a video file headlessly: run object detection per frame, track objects,
-    detect stop-line crossings, and write an annotated output video plus a JSON results file.
+    detect stop-line and red-light crossings, and write an annotated output video plus JSON.
 
-    stop_line_norm: normalized coords [x1,y1,x2,y2] in 0..1 relative to frame width/height.
-    Returns a dict with keys: success, annotated_video_path (absolute), violations (list), results_json_path
+    stop_line_norm / red_light_line_norm: normalized [x1,y1,x2,y2] in 0..1 relative to frame.
     """
     os.makedirs(Config.EVIDENCE_FOLDER, exist_ok=True)
     model_manager = ModelManager()
 
-    # Load model (use provided path or config 'uvh' as default)
     if model_path:
         try:
-            model = YOLO = None
-            # Use Ultralytics YOLO directly
             from ultralytics import YOLO as _YOLO
             model = _YOLO(model_path)
         except Exception as e:
             return {"success": False, "error": f"Failed to load model: {e}"}
     else:
-        # default to uvh
         model = model_manager.load_uvh()
 
     cap = cv2.VideoCapture(video_path)
@@ -270,20 +351,18 @@ def process_video_headless(
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    # compute absolute stop line if provided
     if stop_line_norm is not None:
-        sx1 = int(stop_line_norm[0] * width)
-        sy1 = int(stop_line_norm[1] * height)
-        sx2 = int(stop_line_norm[2] * width)
-        sy2 = int(stop_line_norm[3] * height)
-        stop_line = ((sx1, sy1), (sx2, sy2))
+        stop_line = _norm_line_to_abs(stop_line_norm, width, height)
     else:
-        # default horizontal line near 70% height
         stop_line = ((0, int(height * 0.7)), (width, int(height * 0.7)))
 
-    detector = StopLineViolationDetector(stop_line, max_track_distance=80)
+    if red_light_line_norm is not None:
+        red_light_line = _norm_line_to_abs(red_light_line_norm, width, height)
+    else:
+        red_light_line = ((0, int(height * 0.5)), (width, int(height * 0.5)))
 
-    # prepare output video writer
+    detector = StopLineViolationDetector(stop_line, red_light_line, max_track_distance=80)
+
     if not output_basename:
         output_basename = time.strftime("stopline_output_%Y%m%dT%H%M%S") + "_" + str(uuid.uuid4())[:8]
     output_video_path = os.path.join(Config.EVIDENCE_FOLDER, f"{output_basename}.mp4")
@@ -300,10 +379,8 @@ def process_video_headless(
             if not ret:
                 break
 
-            # run model on frame
             try:
                 results = model(frame)
-                # extract boxes with confidence
                 bboxes = []
                 if results and len(results) > 0 and hasattr(results[0], 'boxes'):
                     r = results[0]
@@ -315,64 +392,80 @@ def process_video_headless(
                         if conf < conf_thres:
                             continue
                         bboxes.append((x1, y1, x2, y2))
-                else:
-                    bboxes = []
-            except Exception as e:
-                # model inference failed for this frame; continue
+            except Exception:
                 bboxes = []
 
             detections = [{'bbox': tuple(map(float, b))} for b in bboxes]
 
-            # process frame through detector (constant light state)
+            violations_on_frame = []
             new_violations = detector.process_frame(detections, initial_light_state, frame_idx)
             if new_violations:
                 violations_log.extend(new_violations)
+                violations_on_frame = new_violations
 
-            # annotate frame: draw track boxes with colors
             vis = frame.copy()
-            # draw stop line
-            cv2.line(vis, (int(stop_line[0][0]), int(stop_line[0][1])), (int(stop_line[1][0]), int(stop_line[1][1])), (0,255,0), 2)
 
             for tid, tr in detector.tracker.tracks.items():
                 if not tr.get('history'):
                     continue
                 _, last_bbox, _ = tr['history'][-1]
                 x1, y1, x2, y2 = map(int, last_bbox)
-                color = (0,0,255) if tr.get('violated', False) else (0,200,255)
-                cv2.rectangle(vis, (x1, y1), (x2, y2), color, 2)
-                cv2.putText(vis, f"ID:{tid}", (x1, y1 - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 2)
 
-            # write frame
+                if tr.get('violation_type') == 'red_light_violation':
+                    color = COLOR_RED
+                elif tr.get('violation_type') == 'stop_line_violation':
+                    color = COLOR_ORANGE
+                else:
+                    color = COLOR_GREEN
+
+                cv2.rectangle(vis, (x1, y1), (x2, y2), color, 2)
+                cv2.putText(vis, f"ID:{tid}", (x1, y1 - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.6, COLOR_TEXT, 2)
+                bx, by = int((x1 + x2) / 2), int(y2)
+                cv2.circle(vis, (bx, by), 3, color, -1)
+
+            for ev in violations_on_frame:
+                x1, y1, x2, y2 = map(int, ev['bbox'])
+                if ev['type'] == 'stop_line_violation':
+                    cv2.rectangle(vis, (x1, y1), (x2, y2), COLOR_ORANGE, 3)
+                    cv2.putText(
+                        vis, f"STOP VIOLATION ID:{ev['track_id']}", (x1, y2 + 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, COLOR_ORANGE, 2,
+                    )
+                elif ev['type'] == 'red_light_violation':
+                    cv2.rectangle(vis, (x1, y1), (x2, y2), COLOR_RED, 3)
+                    cv2.putText(
+                        vis, f"RED LIGHT VIOLATION ID:{ev['track_id']}", (x1, y2 + 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, COLOR_RED, 2,
+                    )
+
+            draw_info(vis, stop_line, red_light_line, initial_light_state, violations_on_frame)
+
             writer.write(vis)
             frame_idx += 1
 
         writer.release()
         cap.release()
 
-        # Re-encode the mp4v output to browser-playable H.264 so the annotated
-        # video can be streamed directly into an HTML5 <video> element.
         _transcode_to_h264(output_video_path)
 
-        # prepare results json
         results = {
             "success": True,
             "annotated_video_path": os.path.abspath(output_video_path),
             "annotated_video_url": f"/evidence/{os.path.basename(output_video_path)}",
-            "violations": []
+            "violations": [],
         }
 
         for v in violations_log:
-            # keep bbox as list of floats
             results["violations"].append({
                 "track_id": int(v["track_id"]),
                 "frame_idx": int(v["frame_idx"]),
                 "bbox": [float(x) for x in v["bbox"]],
                 "prev_point": [float(x) for x in v["prev_point"]],
                 "curr_point": [float(x) for x in v["curr_point"]],
-                "light_state": v.get("light_state", "red")
+                "light_state": v.get("light_state", "red"),
+                "type": v.get("type", "stop_line_violation"),
             })
 
-        # save results json
         json_name = f"{output_basename}.json"
         json_path = os.path.join(Config.EVIDENCE_FOLDER, json_name)
         with open(json_path, 'w') as f:

@@ -14,3 +14,4 @@ venv/
 .deepface/
 *.h5
 traffic3/
+traffic_lappy/

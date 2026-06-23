@@ -83,6 +83,7 @@ export interface StopLineViolation {
   prev_point?: [number, number]
   curr_point?: [number, number]
   light_state: string
+  type: 'stop_line_violation' | 'red_light_violation'
 }
 
 export interface AnalyzeVideoResponse {
@@ -278,6 +279,7 @@ export async function analyzeVideo(
   file: File,
   opts: {
     stopLine: [number, number, number, number]
+    redLightLine: [number, number, number, number]
     initialLightState?: 'red' | 'green'
     confThres?: number
   }
@@ -285,6 +287,7 @@ export async function analyzeVideo(
   const form = new FormData()
   form.append('file', file)
   form.append('stop_line', JSON.stringify(opts.stopLine))
+  form.append('red_light_line', JSON.stringify(opts.redLightLine))
   form.append('initial_light_state', opts.initialLightState ?? 'red')
   form.append('conf_thres', String(opts.confThres ?? 0.3))
 

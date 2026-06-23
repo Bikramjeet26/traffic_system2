@@ -194,6 +194,7 @@ async def analyze_violation(
 async def analyze_video_upload(
     file: UploadFile = File(..., description="Video file (mp4, mov)"),
     stop_line: str = Form(None, description="Optional normalized stop line as JSON '[x1,y1,x2,y2]' (0..1)"),
+    red_light_line: str = Form(None, description="Optional normalized red light line as JSON '[x1,y1,x2,y2]' (0..1)"),
     initial_light_state: str = Form("red", description="Initial light state: 'red' or 'green'"),
     conf_thres: float = Form(0.3, description="Detection confidence threshold"),
 ):
@@ -214,23 +215,26 @@ async def analyze_video_upload(
         with open(tmp_path, "wb") as f:
             f.write(contents)
 
-        # parse stop_line JSON if provided
-        stop_line_norm = None
-        if stop_line:
+        def _parse_norm_line(raw: str, field_name: str):
+            if not raw:
+                return None
             try:
-                parsed = json.loads(stop_line)
+                parsed = json.loads(raw)
                 if (isinstance(parsed, list) or isinstance(parsed, tuple)) and len(parsed) == 4:
-                    stop_line_norm = tuple(map(float, parsed))
-                else:
-                    raise ValueError("stop_line must be a JSON array of 4 numbers [x1,y1,x2,y2]")
+                    return tuple(map(float, parsed))
+                raise ValueError(f"{field_name} must be a JSON array of 4 numbers [x1,y1,x2,y2]")
             except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Invalid stop_line: {e}")
+                raise HTTPException(status_code=400, detail=f"Invalid {field_name}: {e}")
+
+        stop_line_norm = _parse_norm_line(stop_line, "stop_line")
+        red_light_line_norm = _parse_norm_line(red_light_line, "red_light_line")
 
         # Run the headless video processing function (synchronous)
         result = process_video_headless(
             video_path=tmp_path,
             model_path=None,
             stop_line_norm=stop_line_norm,
+            red_light_line_norm=red_light_line_norm,
             initial_light_state=initial_light_state,
             conf_thres=float(conf_thres),
             output_basename=f"stopline_{uuid.uuid4().hex}"
